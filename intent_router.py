@@ -8,10 +8,11 @@ try:
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_chroma import Chroma
     from langchain_core.documents import Document
-except Exception as e:
-    raise RuntimeError(
-        "Faltan dependencias para router (langchain_huggingface, langchain_chroma, langchain_core)."
-    ) from e
+    _HAS_LC_ROUTER_DEPS = True
+except Exception:
+    # Dependencias opcionales: si no están, usaremos un router heurístico simple.
+    _HAS_LC_ROUTER_DEPS = False
+    Document = object  # type: ignore
 
 
 Route = Literal["rag", "sql"]
@@ -25,83 +26,134 @@ class RouteDecision:
     winner: str
 
 
-class IntentRouter:
-    """
-    Router por intención usando dos diccionarios vectorizados (RAG vs SQL).
+if _HAS_LC_ROUTER_DEPS:
 
-    NOTA SOBRE SCORES:
-    - similarity_search_with_score en Chroma suele devolver "distancia" (menor = mejor).
-    - Por eso gana el score más pequeño.
-    """
+    class IntentRouter:
+        """
+        Router por intención usando dos diccionarios vectorizados (RAG vs SQL).
 
-    def __init__(
-        self,
-        persist_dir: str = "data/vectors_intent_router",
-        embed_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-    ):
-        self.embeddings = HuggingFaceEmbeddings(model_name=embed_model)
-        self.db = Chroma(
-            collection_name="intent_router",
-            persist_directory=persist_dir,
-            embedding_function=self.embeddings,
-        )
+        NOTA SOBRE SCORES:
+        - similarity_search_with_score en Chroma suele devolver "distancia" (menor = mejor).
+        - Por eso gana el score más pequeño.
+        """
 
-    def ensure_seed(self) -> None:
-        # si ya hay docs, no reinsertar
-        try:
-            existing = self.db._collection.count()  # type: ignore
-        except Exception:
-            existing = 0
-        if existing > 0:
-            return
+        def __init__(
+            self,
+            persist_dir: str = "data/vectors_intent_router",
+            embed_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        ):
+            self.embeddings = HuggingFaceEmbeddings(model_name=embed_model)
+            self.db = Chroma(
+                collection_name="intent_router",
+                persist_directory=persist_dir,
+                embedding_function=self.embeddings,
+            )
 
-        rag_prompts = [
-            "¿Qué es Kinesis?",
-            "¿En qué consiste la metodología?",
-            "¿Cuáles son los criterios de selección para ser aceptados por el programa?",
-            "¿Cuál es el valor diferencial del programa?",
-            "¿Qué países participan en el proyecto?",
-            "¿A qué nos referimos con 'momentum de impacto'?",
-        ]
+        def ensure_seed(self) -> None:
+            # si ya hay docs, no reinsertar
+            try:
+                existing = self.db._collection.count()  # type: ignore
+            except Exception:
+                existing = 0
+            if existing > 0:
+                return
 
-        sql_prompts = [
-            "¿Cuál es el promedio del ticket promedio de las empresas de México?",
-            "¿A cuánto ascienden el total de las ventas anuales promedio del sector Agroindustria?",
-            "Haz un análisis de la cantidad de empresas según su sector o industria y muéstrame la comparación en un gráfico",
-            "Representa en un gráfico la distribución del genero de las y los participantes",
-            "Genera un gráfico comparativo entre el total de empleos generados versus el total de empleos mantenidos",
-            "¿Cuál es el total de ventas?",
-            "¿Cuál es la suma de ingresos?",
-            "¿Cuál es el conteo por categoría?",
-        ]
+            rag_prompts = [
+                "¿Qué es Kinesis?",
+                "¿En qué consiste la metodología?",
+                "¿Cuáles son los criterios de selección para ser aceptados por el programa?",
+                "¿Cuál es el valor diferencial del programa?",
+                "¿Qué países participan en el proyecto?",
+                "¿A qué nos referimos con 'momentum de impacto'?",
+            ]
 
-        docs: List[Document] = []
-        for q in rag_prompts:
-            docs.append(Document(page_content=q, metadata={"route": "rag"}))
-        for q in sql_prompts:
-            docs.append(Document(page_content=q, metadata={"route": "sql"}))
+            sql_prompts = [
+                "¿Cuál es el promedio del ticket promedio de las empresas de México?",
+                "¿A cuánto ascienden el total de las ventas anuales promedio del sector Agroindustria?",
+                "Haz un análisis de la cantidad de empresas según su sector o industria y muéstrame la comparación en un gráfico",
+                "Representa en un gráfico la distribución del genero de las y los participantes",
+                "Genera un gráfico comparativo entre el total de empleos generados versus el total de empleos mantenidos",
+                "¿Cuál es el total de ventas?",
+                "¿Cuál es la suma de ingresos?",
+                "¿Cuál es el conteo por categoría?",
+            ]
 
-        self.db.add_documents(docs)
-        # persistencia (Chroma suele persistir automáticamente, pero esto ayuda)
-        try:
-            self.db.persist()
-        except Exception:
-            pass
+            docs: List[Document] = []
+            for q in rag_prompts:
+                docs.append(Document(page_content=q, metadata={"route": "rag"}))
+            for q in sql_prompts:
+                docs.append(Document(page_content=q, metadata={"route": "sql"}))
 
-    def _best_score(self, query: str, route: Route, k: int = 4) -> float:
-        docs_scores: List[Tuple[Document, float]] = self.db.similarity_search_with_score(query, k=k)
-        # filtrar por route
-        filtered = [s for (d, s) in docs_scores if (d.metadata or {}).get("route") == route]
-        # si no hay, penaliza
-        if not filtered:
-            return 1e9
-        return min(filtered)  # menor = mejor (distancia)
+            self.db.add_documents(docs)
+            # persistencia (Chroma suele persistir automáticamente, pero esto ayuda)
+            try:
+                self.db.persist()
+            except Exception:
+                pass
 
-    def decide(self, query: str) -> RouteDecision:
-        self.ensure_seed()
-        rag_score = self._best_score(query, "rag", k=8)
-        sql_score = self._best_score(query, "sql", k=8)
+        def _best_score(self, query: str, route: Route, k: int = 4) -> float:
+            docs_scores: List[Tuple[Document, float]] = self.db.similarity_search_with_score(query, k=k)
+            # filtrar por route
+            filtered = [s for (d, s) in docs_scores if (d.metadata or {}).get("route") == route]
+            # si no hay, penaliza
+            if not filtered:
+                return 1e9
+            return min(filtered)  # menor = mejor (distancia)
 
-        if sql_score < rag_score:
-            return RouteDecision(route="sql", rag_score=rag_score, sql_score=sql_score, winner="sql")
-        return RouteDecision(route="rag", rag_score=rag_score, sql_score=sql_score, winner="rag")
+        def decide(self, query: str) -> RouteDecision:
+            self.ensure_seed()
+            rag_score = self._best_score(query, "rag", k=8)
+            sql_score = self._best_score(query, "sql", k=8)
+
+            if sql_score < rag_score:
+                return RouteDecision(route="sql", rag_score=rag_score, sql_score=sql_score, winner="sql")
+            return RouteDecision(route="rag", rag_score=rag_score, sql_score=sql_score, winner="rag")
+
+else:
+
+    class IntentRouter:
+        """
+        Versión simplificada cuando faltan dependencias de LangChain/Chroma.
+        Usa reglas heurísticas para decidir si algo parece más SQL o más RAG.
+        """
+
+        def __init__(
+            self,
+            persist_dir: str = "data/vectors_intent_router",
+            embed_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        ):
+            # No se usan en el modo heurístico; se mantienen por compatibilidad de firma.
+            self.persist_dir = persist_dir
+            self.embed_model = embed_model
+
+        def decide(self, query: str) -> RouteDecision:
+            text = (query or "").lower()
+
+            sql_keywords = [
+                "promedio",
+                "media",
+                "suma",
+                "total",
+                "conteo",
+                "contar",
+                "porcentaje",
+                "distribución",
+                "distribucion",
+                "gráfico",
+                "grafico",
+                "tabla",
+                "ventas",
+                "ingresos",
+                "empleos",
+                "sql",
+                "select ",
+                "from ",
+            ]
+
+            is_sql = any(k in text for k in sql_keywords)
+
+            if is_sql:
+                # En modo heurístico, inventamos scores consistentes: menor es mejor.
+                return RouteDecision(route="sql", rag_score=0.9, sql_score=0.1, winner="sql")
+
+            return RouteDecision(route="rag", rag_score=0.1, sql_score=0.9, winner="rag")

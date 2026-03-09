@@ -471,7 +471,7 @@ def grafico_response(user_input: str, df_res: pd.DataFrame, tipo_grafico: str, i
                 # 1. <b> para negrita, <br><br> para espacio extra
                 "title": {"text": f"<b>{user_input}</b><br><br>", "font": {"family": "Plus Jakarta Sans, sans-serif", "size": 14, "color": "#0d0d55"}, "x": 0.02},
                 # 2. Aumentamos 't' (top margin) de 45 a 70
-                "margin": {"t": 70, "b": 40, "l": 40, "r": 20},
+                "margin": {"t": 70, "b": 120, "l": 40, "r": 20},
                 "xaxis": {"title": "Categoría", "type": "category"},
                 "yaxis": {"title": "Valor"}
             }
@@ -729,7 +729,7 @@ def chat(req: ChatRequest):
             val_num = float(val)
             texto_json = str(data).lower()
 
-            es_moneda = any(p in texto_json for p in ["dolar", "usd", "venta", "costo", "ingreso", "monto", "presupuesto"])
+            es_moneda = any(p in texto_json for p in ["dolar", "usd", "venta", "costo", "ingreso", "monto", "presupuesto","ticket"])
             es_porcentaje = (
                 any(p in texto_json for p in ["porcentaje", "percent", "%", "score"])
                 or "porcentaje" in user_input.lower()
@@ -737,7 +737,7 @@ def chat(req: ChatRequest):
             )
 
             if es_moneda:
-                val_str = f"${val_num:,.0f}"
+                val_str = f"${val_num:,.0f} dólares"
             elif es_porcentaje:
                 # Si viene como 0.86 → 86%
                 if 0 <= val_num <= 1:

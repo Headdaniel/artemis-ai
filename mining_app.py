@@ -77,18 +77,16 @@ def ejecutar_mineria_determinista(df: pd.DataFrame):
         color='Patron',
         size_max=45,
         opacity=0.9,
-        title='<b>El Efecto Dominó: Impacto de la Digitalización en Ventas</b>'
+        title='<b>El Efecto dominó: Impacto de la digitalización en ventas</b>'
     )
 
     fig.update_layout(
     template='plotly_white',
-    height=1050,   # 🔥 hace el gráfico más alto
-    width=1200,   # 🔥 hace el gráfico más ancho
     margin=dict(l=0, r=0, b=0, t=60),
     scene=dict(
-        xaxis=dict(title='Pasarela de pagos'),
-        yaxis=dict(title='Nuevos mercados'),
-        zaxis=dict(title='Cambio en ventas')
+        xaxis=dict(title='PP'),
+        yaxis=dict(title='NM'),
+        zaxis=dict(title='CeV')
     )
 )
 

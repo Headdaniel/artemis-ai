@@ -9,7 +9,6 @@ import rag_app as rag
 import sql_app as sql
 from mining_app import ejecutar_mineria_determinista
 
-
 from intent_router import IntentRouter
 
 app = FastAPI()
@@ -40,10 +39,8 @@ def unified_chat(req: ChatRequest):
     if not user_input:
         return {"tipo": "texto", "respuesta": "Escribe una pregunta."}
 
-    # 🔴 0) MINERÍA DETERMINISTA (ANTES DE TODO)
     if user_input.lower() == "ejecuta un análisis minería de datos para encontrar el patrón oculto más relevante":
         return ejecutar_mineria_determinista(sql.df)
-
     # 🔹 1) SALUDOS
     if user_input.lower() in ["hola", "buenas", "hey", "buenos dias", "buenos días"]:
         return rag.chat(rag.ChatRequest(texto=user_input))
